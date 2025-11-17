@@ -17,16 +17,24 @@ CIFAR_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR_STD  = (0.2023, 0.1994, 0.2010)
 
 def get_dataloaders(batch_size: int = 256, num_workers: int = 8, normalize_imagenet: bool = False) -> Tuple[DataLoader, DataLoader]:
-    trans = []
     if normalize_imagenet:
-        trans += [transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD)]
+        mean, std = IMAGENET_MEAN, IMAGENET_STD
     else:
-        trans += [transforms.Normalize(CIFAR_MEAN, CIFAR_STD)]
+        mean, std = CIFAR_MEAN, CIFAR_STD
 
-    trans = transforms.Compose([transforms.ToTensor()] + trans)
+    train_trans = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+    val_trans = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
 
-    train_set = datasets.CIFAR10(root='./data', train=True, download=True, transform=trans)
-    val_set   = datasets.CIFAR10(root='./data', train=False, download=True, transform=trans)
+    train_set = datasets.CIFAR10(root='./data', train=True, download=True, transform=train_trans)
+    val_set = datasets.CIFAR10(root='./data', train=False, download=True, transform=val_trans)
 
     train_loader = DataLoader(
         train_set, batch_size=batch_size, shuffle=True,
@@ -127,6 +135,7 @@ def train(
         train_loader: DataLoader,
         val_loader: DataLoader,
         optimizer: torch.optim.Optimizer,
+        num_epochs: int,
         ckpt_dir,
         notes: str,
         scheduler: Any = None,
@@ -139,7 +148,7 @@ def train(
     run_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     writer = SummaryWriter(log_dir=f"runs/{net.name}/{notes}_{run_time}")
     try:
-        while(True):
+        for epoch in range(num_epochs):
             train_loss, train_acc = train_epoch(net, train_loader, optimizer, device)
             val_loss, val_acc = evaluate(net, val_loader, device)
 
@@ -154,17 +163,16 @@ def train(
             print(f'Epoch{epoch},train_loss={train_loss:.4f},train_acc={train_acc:.2f},val_loss={val_loss:.4f},val_acc={val_acc:.2f}')
 
             if epoch % ckpt_every_epochs == 0:
-                save_checkpoint(f"{ckpt_dir}/{net.name}_epoch{epoch}.ckpt", net, optimizer, scheduler, epoch, best_loss)
+                save_checkpoint(f"{ckpt_dir}/{net.name}_epoch{epoch}.ckpt", net, optimizer, epoch, best_loss, scheduler)
             if best_loss > val_loss:
                 best_loss = val_loss
-                save_checkpoint(f"{ckpt_dir}/{net.name}_best.ckpt", net, optimizer, scheduler, epoch, best_loss)
+                save_checkpoint(f"{ckpt_dir}/{net.name}_{notes}_{run_time}best.ckpt", net, optimizer, epoch, best_loss, scheduler)
                 print(f"  -> New BEST saved ({best_loss:.4f})")
 
             if scheduler is not None:
                 scheduler.step()
-            epoch += 1
 
     except KeyboardInterrupt:
         print("\nSaving LAST checkpoint...")
-        save_checkpoint(f'{ckpt_dir}/{net.name}_epoch{epoch}_last.ckpt', net, optimizer, scheduler, epoch, best_loss)
+        save_checkpoint(f'{ckpt_dir}/{net.name}_last.ckpt', net, optimizer, epoch, best_loss, scheduler)
         print(f"Stopped at epoch {epoch}. last checkpoint saved.")

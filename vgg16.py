@@ -17,10 +17,10 @@ def main():
     )
 
     train_loader, val_loader = get_dataloaders()
-    optimizer = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20], gamma=0.1)
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50, 100], gamma=0.1)
 
-    train(net, train_loader, val_loader, optimizer, './checkpoints/vgg16', scheduler=scheduler, notes='UseMultiStepLR')
+    train(net, train_loader, val_loader, optimizer, 150, './checkpoints/vgg16', scheduler=scheduler, notes='SGD_lr=0.1_momentum=0.9_weight_decay=5e-4_MultiStepLR_50,100')
 
 if __name__ == "__main__":
     main()
