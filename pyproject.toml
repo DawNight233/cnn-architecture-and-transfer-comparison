@@ -5,8 +5,10 @@ description = "A comparative study of CNN architecture evolution, model depth, a
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib>=3.10.7",
     "tensorboard>=2.20.0",
     "torch>=2.9.0",
+    "torchmetrics>=1.8.2",
     "torchvision==0.24.0+cu130",
 ]
 

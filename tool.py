@@ -16,25 +16,38 @@ IMAGENET_STD  = (0.229, 0.224, 0.225)
 CIFAR_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR_STD  = (0.2023, 0.1994, 0.2010)
 
-def get_dataloaders(batch_size: int = 256, num_workers: int = 8, normalize_imagenet: bool = False) -> Tuple[DataLoader, DataLoader]:
+def get_dataloaders(batch_size: int = 256, num_workers: int = 8, normalize_imagenet: bool = False, resize_to_224: bool = False) -> Tuple[DataLoader, DataLoader]:
     if normalize_imagenet:
         mean, std = IMAGENET_MEAN, IMAGENET_STD
     else:
         mean, std = CIFAR_MEAN, CIFAR_STD
 
-    train_trans = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
+    train_trans = []
+    val_trans = []
+
+    if resize_to_224:
+        train_trans += [
+            transforms.Resize(256),
+            transforms.RandomCrop(224)
+        ]
+        val_trans.append(transforms.Resize(224))
+    else:
+        train_trans += [
+            transforms.RandomCrop(32, padding=4)
+        ]
+
+    train_trans += [
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
-    val_trans = transforms.Compose([
+        transforms.Normalize(mean=mean, std=std)
+    ]
+    val_trans += [
         transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
+        transforms.Normalize(mean=mean, std=std)
+    ]
 
-    train_set = datasets.CIFAR10(root='./data', train=True, download=True, transform=train_trans)
-    val_set = datasets.CIFAR10(root='./data', train=False, download=True, transform=val_trans)
+    train_set = datasets.CIFAR10(root='./data', train=True, download=True, transform=transforms.Compose(train_trans))
+    val_set = datasets.CIFAR10(root='./data', train=False, download=True, transform=transforms.Compose(val_trans))
 
     train_loader = DataLoader(
         train_set, batch_size=batch_size, shuffle=True,
@@ -66,7 +79,7 @@ def evaluate(
         images = images.to(device)
         labels = labels.to(device)
         outputs = net(images)
-        loss = nn.CrossEntropyLoss()(outputs, labels)
+        loss = nn.CrossEntropyLoss(label_smoothing=0.1)(outputs, labels)
         acc = accuracy(outputs, labels)
         running_loss += loss.item()
         running_acc += acc.item()
@@ -88,7 +101,7 @@ def train_epoch(
         labels = labels.to(device)
         optimizer.zero_grad()
         output = net(features)
-        loss = nn.CrossEntropyLoss()(output, labels)
+        loss = nn.CrossEntropyLoss(label_smoothing=0.1)(output, labels)
         loss.backward()
         optimizer.step()
         acc = accuracy(output, labels)
@@ -119,13 +132,14 @@ def save_checkpoint(
 def load_checkpoint(
         path: str,
         net: nn.Module,
-        optimizer: torch.optim.Optimizer,
-        map_location="cpu",
-        scheduler: Any = None
+        optimizer: torch.optim.Optimizer | None = None,
+        scheduler: Any = None,
+        map_location="cuda"
 ):
     ckpt = torch.load(path, map_location=map_location)
     net.load_state_dict(ckpt["net"])
-    optimizer.load_state_dict(ckpt["optimizer"])
+    if optimizer is not None:
+        optimizer.load_state_dict(ckpt["optimizer"])
     if scheduler is not None:
         scheduler.load_state_dict(ckpt["scheduler"])
     return ckpt["epoch"], ckpt["best_loss"]
@@ -135,20 +149,25 @@ def train(
         train_loader: DataLoader,
         val_loader: DataLoader,
         optimizer: torch.optim.Optimizer,
-        num_epochs: int,
+        start_epoch: int,
+        end_epoch: int,
         ckpt_dir,
         notes: str,
         scheduler: Any = None,
         ckpt_every_epochs=5,
-        device="cuda"
+        device="cpu",
+        log_dir: str | None = None
 ):
     net.to(device)
     best_loss = float('inf')
-    epoch = 0
-    run_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    writer = SummaryWriter(log_dir=f"runs/{net.name}/{notes}_{run_time}")
+    epoch = start_epoch
+    if log_dir:
+        writer = SummaryWriter(log_dir=f"runs/{log_dir}")
+    else:
+        run_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        writer = SummaryWriter(log_dir=f"runs/{net.name}/{notes}_{run_time}")
     try:
-        for epoch in range(num_epochs):
+        for epoch in range(start_epoch, end_epoch):
             train_loss, train_acc = train_epoch(net, train_loader, optimizer, device)
             val_loss, val_acc = evaluate(net, val_loader, device)
 
@@ -166,7 +185,7 @@ def train(
                 save_checkpoint(f"{ckpt_dir}/{net.name}_epoch{epoch}.ckpt", net, optimizer, epoch, best_loss, scheduler)
             if best_loss > val_loss:
                 best_loss = val_loss
-                save_checkpoint(f"{ckpt_dir}/{net.name}_{notes}_{run_time}best.ckpt", net, optimizer, epoch, best_loss, scheduler)
+                save_checkpoint(f"{ckpt_dir}/{net.name}_{notes}_{run_time}_best.ckpt", net, optimizer, epoch, best_loss, scheduler)
                 print(f"  -> New BEST saved ({best_loss:.4f})")
 
             if scheduler is not None:
